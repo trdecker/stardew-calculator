@@ -87,6 +87,9 @@ CROPS = {
     # Ancient Fruit: from Ancient Seeds, not normally purchasable with gold
     # (Seed Maker / artifact spots) -- grows in any season outdoors but Winter.
     "Ancient Fruit":   ("Fruit", 550, 0, 28, 7, ("Spring", "Summer", "Fall")),
+    # Qi Fruit: Qi Fruit Seeds from the Walnut Room (Qi Gems), not purchasable
+    # with gold. Treated like Ancient Fruit -- any season outdoors but Winter.
+    "Qi Fruit":        ("Fruit", 400, 0, 7, None, ("Spring", "Summer", "Fall")),
     # Not grown -- an already-purchased seed packet fed straight into an Oil
     # Maker (or resold). Modeled as an instant "harvest" so Replace lets you
     # keep buying and pressing a fresh packet every day.
@@ -113,6 +116,8 @@ FRUIT_TREES = {
     "Cherry":      (80, 3400, ("Spring",)),
     "Orange":      (100, 4000, ("Summer",)),
     "Peach":       (140, 6000, ("Summer",)),
+    # Banana Sapling comes from the Island Trader (1 Dragon Tooth), not gold.
+    "Banana":      (150, 0, ("Summer",)),
     "Apple":       (100, 4000, ("Fall",)),
     "Pomegranate": (140, 6000, ("Fall",)),
 }
@@ -123,6 +128,25 @@ GREENHOUSE_TREE_SLOTS = 18  # the greenhouse's dedicated tree ring
 
 FARM_CROP_CAPACITY = 3427   # tillable squares on the standard farm map
 GREENHOUSE_CAPACITY = 120   # tillable squares inside the greenhouse
+
+# Soil fertilizer's real effect is shifting a crop's quality-tier odds, which
+# this calculator doesn't model (no Farming level is tracked). Approximated
+# instead as a flat sell-price bump reflecting the average quality uplift.
+# Applies to crop rows only -- trees aren't fertilized this way.
+FERTILIZER_QUALITY_MULT = {
+    "None": 1.0,
+    "Basic Fertilizer": 1.05,
+    "Quality Fertilizer": 1.10,
+    "Deluxe Fertilizer": 1.20,
+}
+# Speed-Gro fertilizers cut growth (and regrowth) time; stacks additively
+# with Agriculturist, same as in-game.
+SPEED_GRO_BONUS = {
+    "None": 0.0,
+    "Speed-Gro": 0.10,
+    "Deluxe Speed-Gro": 0.25,
+    "Hyper Speed-Gro": 0.33,
+}
 # -----------------------------------------------------------------------------
 
 # skill -> {level 5 profession: [level 10 options for that profession]}
@@ -256,9 +280,11 @@ def profit_events(animal, start_friendship, process, s):
     return DAYS[mask], per_product[mask]
 
 
-def grow_time(days, s):
-    """Agriculturist speeds up growth and regrowth by ~10%."""
-    return max(1, round(days * 0.9)) if s.agriculturist else days
+def grow_time(days, s, speed_bonus=0.0):
+    """Agriculturist's -10% stacks additively with a Speed-Gro fertilizer's
+    growth-time reduction (0 for no fertilizer/trees), same as in-game."""
+    total = (0.10 if s.agriculturist else 0.0) + speed_bonus
+    return max(1, round(days * (1 - total))) if total else days
 
 
 def is_tree(name):
@@ -352,7 +378,7 @@ def processing_days(name, method):
     return 1  # Oil Maker / Dehydrator
 
 
-def crop_events(name, replace, method, s):
+def crop_events(name, replace, method, carryover, fertilizer, speed_gro, s):
     """Days (within DAYS) one planted crop/tree's goods actually sell on --
     harvest day plus however long the chosen processing method takes -- the
     net value (sell price minus any seed/sapling cost) on each of those days,
@@ -363,24 +389,32 @@ def crop_events(name, replace, method, s):
     regrow_days off a single seed/sapling purchase; non-regrowable crops are
     harvested once unless `replace` re-plants them immediately (a fresh seed
     purchase each cycle), repeating the full growth cycle for the rest of
-    the month."""
+    the month. `carryover` (greenhouse only) assumes the plant was already
+    standing fully grown when the month started -- no growth wait, and no
+    seed/sapling cost since that was already paid in a previous month.
+    `fertilizer`/`speed_gro` are per-row choices that don't apply to trees."""
     _category, _sell_price, seed_cost, growth_days, regrow_days, _seasons = crop_info(name)
-    growth_days = grow_time(growth_days, s)
-    unit_price = processing_price(name, method, s)
+    speed_bonus = SPEED_GRO_BONUS[speed_gro]
+    growth_days = grow_time(growth_days, s, speed_bonus)
+    unit_price = processing_price(name, method, s) * FERTILIZER_QUALITY_MULT[fertilizer]
     delay = processing_days(name, method)
+    start_day = 1 if carryover else growth_days
 
     if regrow_days is not None:
-        harvest_days = np.arange(growth_days, len(DAYS) + 1, grow_time(regrow_days, s))
+        interval = grow_time(regrow_days, s, speed_bonus)
+        harvest_days = np.arange(start_day, len(DAYS) + 1, interval)
         prices = np.full(len(harvest_days), unit_price)
-        if len(prices):
+        if len(prices) and not carryover:
             prices[0] -= seed_cost  # one seed/sapling bought up front
     elif replace:
-        harvest_days = np.arange(growth_days, len(DAYS) + 1, growth_days)
+        harvest_days = np.arange(start_day, len(DAYS) + 1, growth_days)
         prices = np.full(len(harvest_days), unit_price - seed_cost)  # a fresh seed each cycle
+        if carryover and len(prices):
+            prices[0] += seed_cost  # the carried-over first planting is already paid for
     else:
-        harvest_days = (np.array([growth_days]) if growth_days <= len(DAYS)
+        harvest_days = (np.array([start_day]) if start_day <= len(DAYS)
                         else np.array([], dtype=int))
-        prices = np.full(len(harvest_days), unit_price - seed_cost)
+        prices = np.full(len(harvest_days), unit_price if carryover else unit_price - seed_cost)
 
     harvest_total = prices.sum()  # full value of this month's harvests, pending or not
     sale_days = harvest_days + delay
@@ -516,41 +550,48 @@ class BuildingCard:
         if self.total() >= self.capacity():
             return
         allowed = allowed_animals(self.type.get())
-        frame = ttk.Frame(self.animal_frame)
+        frame = ttk.Frame(self.animal_frame, relief="groove", borderwidth=1, padding=2)
         frame.pack(fill="x", pady=2)
+        line1 = ttk.Frame(frame)
+        line1.pack(fill="x")
+        line2 = ttk.Frame(frame)
+        line2.pack(fill="x", pady=(2, 0))
+
         animal = tk.StringVar(value=allowed[0])
         friendship = tk.IntVar(value=500)
         number = tk.IntVar(value=1)
         process = tk.BooleanVar(value=True)
 
-        spin = tk.Spinbox(frame, textvariable=number, from_=1, to=self.capacity(), width=4,
+        spin = tk.Spinbox(line1, textvariable=number, from_=1, to=self.capacity(), width=4,
                           command=lambda: self.on_numbers_change(row))
         spin.pack(side="left")
         spin.bind("<KeyRelease>", lambda e: self.on_numbers_change(row))
-        ttk.Label(frame, text="\u00d7").pack(side="left", padx=2)
+        ttk.Label(line1, text="\u00d7").pack(side="left", padx=2)
 
-        combo = ttk.Combobox(frame, textvariable=animal, values=allowed,
+        combo = ttk.Combobox(line1, textvariable=animal, values=allowed,
                              state="readonly", width=12)
         combo.pack(side="left")
 
-        product_label = ttk.Label(frame, width=12)
-        product_label.pack(side="left", padx=(4, 0))
-
-        tk.Scale(frame, variable=friendship, from_=0, to=1000, orient="horizontal",
+        tk.Scale(line1, variable=friendship, from_=0, to=1000, orient="horizontal",
                  length=130, command=lambda v: self.app.update_plot()).pack(side="left", padx=4)
 
-        ttk.Checkbutton(frame, text="Process", variable=process,
+        ttk.Button(line1, text="\u2715", width=3,
+                   command=lambda: self.remove_animal(row)).pack(side="left")
+
+        # Below the dropdown: what it produces, whether to process it, and profit.
+        product_label = ttk.Label(line2, width=12)
+        product_label.pack(side="left")
+
+        ttk.Checkbutton(line2, text="Process", variable=process,
                         command=self.app.update_plot).pack(side="left", padx=(4, 0))
 
-        profit_label = ttk.Label(frame, width=14, anchor="e")
+        profit_label = ttk.Label(line2, width=14, anchor="e")
         profit_label.pack(side="left", padx=(4, 0))
 
         row = SimpleNamespace(frame=frame, animal=animal, friendship=friendship, number=number,
                               process=process, spin=spin, combo=combo,
                               product_label=product_label, profit_label=profit_label)
         combo.bind("<<ComboboxSelected>>", lambda e: self.on_animal_change(row))
-        ttk.Button(frame, text="\u2715", width=3,
-                   command=lambda: self.remove_animal(row)).pack(side="left")
         self.rows.append(row)
         self.on_animal_change(row)
 
@@ -576,11 +617,14 @@ class CropSection:
     single section mix items with different space requirements, e.g. a fruit
     tree taking 9 outdoor tiles per tree vs. 1 for a regular crop."""
 
-    def __init__(self, app, parent, title, capacity, crop_options, tile_cost=None):
+    def __init__(self, app, parent, title, capacity, crop_options, tile_cost=None,
+                allow_carryover=False, has_fertilizer=True):
         self.app = app
         self.capacity = capacity
         self.crop_options = crop_options  # callable -> list of valid crop/tree names
         self.tile_cost = tile_cost or (lambda name: 1)
+        self.allow_carryover = allow_carryover  # greenhouse only: assume already mature
+        self.has_fertilizer = has_fertilizer    # crop rows only, never trees
         self.rows = []  # SimpleNamespace(frame, crop, number, replace, method, spin, combo, ...)
 
         self.box = ttk.LabelFrame(parent, text=title, padding=6)
@@ -629,38 +673,64 @@ class CropSection:
         if not options:
             messagebox.showinfo("No crops", "No crops are available here right now.")
             return
-        frame = ttk.Frame(self.crop_frame)
+        frame = ttk.Frame(self.crop_frame, relief="groove", borderwidth=1, padding=2)
         frame.pack(fill="x", pady=2)
+        line1 = ttk.Frame(frame)
+        line1.pack(fill="x")
+        line2 = ttk.Frame(frame)
+        line2.pack(fill="x", pady=(2, 0))
+
         crop = tk.StringVar(value=options[0])
         number = tk.IntVar(value=1)
         replace = tk.BooleanVar(value=False)
         method = tk.StringVar(value="Raw")
+        carryover = tk.BooleanVar(value=False)
+        fertilizer = tk.StringVar(value="None")
+        speed_gro = tk.StringVar(value="None")
 
         room = max(1, (self.capacity - self.total()) // self.tile_cost(options[0]))
-        spin = tk.Spinbox(frame, textvariable=number, from_=1, to=room, width=5,
+        spin = tk.Spinbox(line1, textvariable=number, from_=1, to=room, width=5,
                           command=lambda: self.on_numbers_change(row))
         spin.pack(side="left")
         spin.bind("<KeyRelease>", lambda e: self.on_numbers_change(row))
-        ttk.Label(frame, text="×").pack(side="left", padx=2)
+        ttk.Label(line1, text="×").pack(side="left", padx=2)
 
-        combo = ttk.Combobox(frame, textvariable=crop, values=options, state="readonly", width=12)
+        combo = ttk.Combobox(line1, textvariable=crop, values=options, state="readonly", width=12)
         combo.pack(side="left")
 
-        method_combo = ttk.Combobox(frame, textvariable=method, state="readonly", width=12)
+        method_combo = ttk.Combobox(line1, textvariable=method, state="readonly", width=12)
         method_combo.pack(side="left", padx=(4, 0))
         method_combo.bind("<<ComboboxSelected>>", lambda e: self.app.update_plot())
 
-        check = ttk.Checkbutton(frame, text="Replace", variable=replace, command=self.app.update_plot)
+        check = ttk.Checkbutton(line1, text="Replace", variable=replace, command=self.app.update_plot)
         check.pack(side="left", padx=(6, 0))
 
-        profit_label = ttk.Label(frame, width=14, anchor="e")
+        profit_label = ttk.Label(line1, width=14, anchor="e")
         profit_label.pack(side="left", padx=(4, 0))
 
+        fert_combo = speed_combo = carryover_check = None
+        if self.has_fertilizer:
+            fert_combo = ttk.Combobox(line2, textvariable=fertilizer, state="readonly", width=16,
+                                      values=list(FERTILIZER_QUALITY_MULT))
+            fert_combo.pack(side="left")
+            fert_combo.bind("<<ComboboxSelected>>", lambda e: self.app.update_plot())
+
+            speed_combo = ttk.Combobox(line2, textvariable=speed_gro, state="readonly", width=16,
+                                       values=list(SPEED_GRO_BONUS))
+            speed_combo.pack(side="left", padx=(4, 0))
+            speed_combo.bind("<<ComboboxSelected>>", lambda e: self.app.update_plot())
+        if self.allow_carryover:
+            carryover_check = ttk.Checkbutton(line2, text="Carryover (already mature)",
+                                              variable=carryover, command=self.app.update_plot)
+            carryover_check.pack(side="left", padx=(4, 0))
+
         row = SimpleNamespace(frame=frame, crop=crop, number=number, replace=replace, method=method,
+                              carryover=carryover, fertilizer=fertilizer, speed_gro=speed_gro,
                               spin=spin, combo=combo, method_combo=method_combo, check=check,
-                              profit_label=profit_label)
+                              profit_label=profit_label, fert_combo=fert_combo,
+                              speed_combo=speed_combo, carryover_check=carryover_check)
         combo.bind("<<ComboboxSelected>>", lambda e: (self.refresh_crop_row(row), self.on_numbers_change(row)))
-        ttk.Button(frame, text="✕", width=3,
+        ttk.Button(line1, text="✕", width=3,
                    command=lambda: self.remove_crop(row)).pack(side="left", padx=(6, 0))
         self.rows.append(row)
         self.refresh_crop_row(row)
@@ -671,7 +741,8 @@ class CropSection:
         """A regrowing crop (or a mature fruit tree) keeps producing on its
         own, so "Replace" only applies to (and is only enabled for)
         one-and-done crops. The processing dropdown's options depend on which
-        methods this crop supports (e.g. Wheat/Hops have no Preserves Jar)."""
+        methods this crop supports (e.g. Wheat/Hops have no Preserves Jar).
+        Fertilizer/Speed-Gro never apply to trees, only crop rows."""
         regrows = crop_info(row.crop.get())[4] is not None
         if regrows:
             row.replace.set(False)
@@ -681,6 +752,14 @@ class CropSection:
         row.method_combo.config(values=methods)
         if row.method.get() not in methods:
             row.method.set("Raw")
+
+        if row.fert_combo is not None:
+            tree = is_tree(row.crop.get())
+            if tree:
+                row.fertilizer.set("None")
+                row.speed_gro.set("None")
+            row.fert_combo.config(state="disabled" if tree else "readonly")
+            row.speed_combo.config(state="disabled" if tree else "readonly")
 
     def remove_crop(self, row):
         row.frame.destroy()
@@ -734,17 +813,22 @@ class App:
             self, left, "Crops (outdoor)", FARM_CROP_CAPACITY,
             lambda: harvestable_crops(self.season.get()) + harvestable_trees(self.season.get()),
             tile_cost=lambda name: TREE_TILES if is_tree(name) else 1)
+        # Carryover only makes sense in the greenhouse: it grows year-round, so
+        # unlike the outdoor plot (which resets every season) its plants can
+        # plausibly already be established when a given month starts.
         self.greenhouse = CropSection(
             self, left, "Greenhouse (any season)", GREENHOUSE_CAPACITY,
-            lambda: harvestable_crops_any_season())
+            lambda: harvestable_crops_any_season(), allow_carryover=True)
         # The greenhouse's fruit trees live in its own dedicated 18-slot ring,
         # entirely separate from its 120 regular crop tiles.
         self.greenhouse_trees = CropSection(
             self, left, "Greenhouse fruit trees", GREENHOUSE_TREE_SLOTS,
-            lambda: harvestable_trees_any_season())
+            lambda: harvestable_trees_any_season(), allow_carryover=True, has_fertilizer=False)
         ttk.Label(left, wraplength=430, text=(
             "Rows: number \u00d7 crop \u00d7 sell as Raw/Keg/Preserves Jar/Oil Maker/Dehydrator; "
-            "\u201cReplace\u201d replants one-and-done crops immediately after harvest. "
+            "\u201cReplace\u201d replants one-and-done crops immediately after harvest; fertilizer/"
+            "Speed-Gro (crops only) boost sell price / cut growth time; \u201cCarryover\u201d "
+            "(greenhouse only) assumes the plant is already mature when the month starts. "
             "Seed/sapling cost is already subtracted from profit.")
         ).pack(anchor="w", pady=(6, 0))
 
@@ -865,12 +949,15 @@ class App:
             for row in section.rows:
                 count = read_int(row.number, 0)
                 crop, method = row.crop.get(), row.method.get()
-                days, per_event, harvest_total = crop_events(crop, row.replace.get(), method, s)
+                days, per_event, harvest_total = crop_events(
+                    crop, row.replace.get(), method, row.carryover.get(),
+                    row.fertilizer.get(), row.speed_gro.get(), s)
                 row.profit_label.config(text=f"{per_event.sum():,.0f}g/ea")
                 y = count * per_event
                 label = (f"{section_label}{count} × {crop}"
                         + (f" ({method})" if method != "Raw" else "")
-                        + (" (replace)" if row.replace.get() else ""))
+                        + (" (replace)" if row.replace.get() else "")
+                        + (" (carryover)" if row.carryover.get() else ""))
                 self.ax.scatter(days, y, s=18, label=label)
                 total[days - 1] += y
                 pending_extra += count * (harvest_total - per_event.sum())
