@@ -42,34 +42,87 @@ FRIENDSHIP_GAIN_PER_DAY = 15   # friendship points gained each day
 WOOL_TWO_CLOTH = {"Regular": 0.0, "Silver": 0.1, "Gold": 0.5, "Iridium": 1.0}
 
 SEASONS = ("Spring", "Summer", "Fall", "Winter")
-# crop -> (sell price, days to first harvest, days between regrowths or None
-# if it's a one-and-done harvest, season). Assumes 1 unit sold per harvest
-# (ignores per-harvest extra-yield mechanics like Blueberry's 3-per-harvest).
-# Winter has no standard outdoor crops, so it's left empty.
+# crop -> (category, sell price, seed cost, days to first harvest, days
+# between regrowths or None if it's a one-and-done harvest, seasons it grows
+# in). Category is "Vegetable", "Fruit", "Flower", or "Seed" (a purchasable
+# seed packet that's itself a machine ingredient, e.g. Sunflower Seeds).
+# Assumes 1 unit sold per harvest (ignores per-harvest extra-yield mechanics
+# like Blueberry's 3-per-harvest). Winter has no standard outdoor crops.
+# Broccoli/Carrot aren't real Stardew Valley items, so they're not included;
+# Powdermelon (a Fair prize, no gold seed cost) covers that spirit instead.
 CROPS = {
-    "Parsnip":     (35, 4, None, "Spring"),
-    "Green Bean":  (40, 10, 3, "Spring"),
-    "Cauliflower": (175, 12, None, "Spring"),
-    "Potato":      (80, 6, None, "Spring"),
-    "Garlic":      (60, 4, None, "Spring"),
-    "Kale":        (110, 6, None, "Spring"),
-    "Strawberry":  (120, 8, 4, "Spring"),
-    "Blueberry":   (50, 13, 4, "Summer"),
-    "Corn":        (50, 14, 4, "Summer"),
-    "Hops":        (25, 11, 1, "Summer"),
-    "Hot Pepper":  (40, 5, 3, "Summer"),
-    "Melon":       (250, 12, None, "Summer"),
-    "Radish":      (90, 6, None, "Summer"),
-    "Wheat":       (25, 4, None, "Summer"),
-    "Amaranth":    (150, 7, None, "Fall"),
-    "Artichoke":   (160, 8, None, "Fall"),
-    "Bok Choy":    (80, 4, None, "Fall"),
-    "Cranberries": (75, 7, 5, "Fall"),
-    "Eggplant":    (60, 5, 5, "Fall"),
-    "Grape":       (80, 10, 3, "Fall"),
-    "Pumpkin":     (320, 13, None, "Fall"),
-    "Yam":         (160, 10, None, "Fall"),
+    "Parsnip":         ("Vegetable", 35, 20, 4, None, ("Spring",)),
+    "Green Bean":      ("Vegetable", 40, 60, 10, 3, ("Spring",)),
+    "Cauliflower":     ("Vegetable", 175, 80, 12, None, ("Spring",)),
+    "Potato":          ("Vegetable", 80, 50, 6, None, ("Spring",)),
+    "Garlic":          ("Vegetable", 60, 40, 4, None, ("Spring",)),
+    "Kale":            ("Vegetable", 110, 70, 6, None, ("Spring",)),
+    "Rhubarb":         ("Fruit", 220, 100, 13, None, ("Spring",)),
+    "Strawberry":      ("Fruit", 120, 100, 8, 4, ("Spring",)),
+    "Tulip":           ("Flower", 30, 20, 6, None, ("Spring",)),
+    "Blue Jazz":       ("Flower", 50, 30, 7, None, ("Spring",)),
+    "Blueberry":       ("Fruit", 50, 80, 13, 4, ("Summer",)),
+    "Corn":            ("Vegetable", 50, 150, 14, 4, ("Summer", "Fall")),
+    "Hops":            ("Vegetable", 25, 60, 11, 1, ("Summer",)),
+    "Hot Pepper":      ("Fruit", 40, 40, 5, 3, ("Summer",)),
+    "Melon":           ("Fruit", 250, 80, 12, None, ("Summer",)),
+    "Powdermelon":     ("Fruit", 250, 0, 12, None, ("Summer",)),  # Fair prize, no gold cost
+    "Radish":          ("Vegetable", 90, 40, 6, None, ("Summer",)),
+    "Red Cabbage":     ("Vegetable", 260, 100, 9, None, ("Summer",)),
+    "Starfruit":       ("Fruit", 750, 400, 13, None, ("Summer",)),
+    "Wheat":           ("Vegetable", 25, 10, 4, None, ("Summer", "Fall")),
+    "Poppy":           ("Flower", 140, 100, 7, None, ("Summer",)),
+    "Summer Spangle":  ("Flower", 90, 50, 8, None, ("Summer",)),
+    "Sunflower":       ("Flower", 80, 200, 8, None, ("Summer", "Fall")),
+    "Amaranth":        ("Vegetable", 150, 70, 7, None, ("Fall",)),
+    "Artichoke":       ("Vegetable", 160, 30, 8, None, ("Fall",)),
+    "Bok Choy":        ("Vegetable", 80, 50, 4, None, ("Fall",)),
+    "Cranberries":     ("Fruit", 75, 120, 7, 5, ("Fall",)),
+    "Eggplant":        ("Vegetable", 60, 20, 5, 5, ("Fall",)),
+    "Grape":           ("Fruit", 80, 60, 10, 3, ("Fall",)),
+    "Pumpkin":         ("Vegetable", 320, 100, 13, None, ("Fall",)),
+    "Sweet Gem Berry": ("Vegetable", 3000, 1000, 24, None, ("Fall",)),
+    "Yam":             ("Vegetable", 160, 60, 10, None, ("Fall",)),
+    "Fairy Rose":      ("Flower", 290, 100, 12, None, ("Fall",)),
+    # Ancient Fruit: from Ancient Seeds, not normally purchasable with gold
+    # (Seed Maker / artifact spots) -- grows in any season outdoors but Winter.
+    "Ancient Fruit":   ("Fruit", 550, 0, 28, 7, ("Spring", "Summer", "Fall")),
+    # Not grown -- an already-purchased seed packet fed straight into an Oil
+    # Maker (or resold). Modeled as an instant "harvest" so Replace lets you
+    # keep buying and pressing a fresh packet every day.
+    "Sunflower Seeds": ("Seed", 20, 20, 1, None, ("Spring", "Summer", "Fall", "Winter")),
 }
+# Crops classified "Fruit" turn into Wine (Keg) / Jam (Preserves Jar) and can
+# use the Dehydrator; "Vegetable" turns into Juice (Keg) / Pickles (Jar); "Flower"
+# and "Seed" get neither by default (see OIL_MAKER_PRICE for the exceptions).
+# Wheat and Hops have their own fixed-price Keg recipes (Beer, Pale Ale)
+# instead of the generic Wine/Juice formula, and have no Preserves Jar recipe.
+KEG_FIXED_PRICE = {"Wheat": 200, "Hops": 300}
+NO_PRESERVES_JAR = {"Wheat", "Hops"}
+# Oil Maker only accepts these specific crops, regardless of category, and
+# they all produce plain Oil at the same price.
+OIL_MAKER_PRICE = {"Corn": 100, "Sunflower": 100, "Sunflower Seeds": 100}
+
+# tree -> (fruit sell price, sapling cost, seasons it fruits in). All fruit
+# trees take the same ~28 days to mature from a sapling, then fruit once a
+# day during their season(s) thereafter (a tree planted fresh this month
+# barely matures by day 28, so it nets mostly the sapling cost this month --
+# an accurate reflection of fruit trees being a long-term investment).
+FRUIT_TREES = {
+    "Apricot":     (50, 2000, ("Spring",)),
+    "Cherry":      (80, 3400, ("Spring",)),
+    "Orange":      (100, 4000, ("Summer",)),
+    "Peach":       (140, 6000, ("Summer",)),
+    "Apple":       (100, 4000, ("Fall",)),
+    "Pomegranate": (140, 6000, ("Fall",)),
+}
+TREE_MATURITY_DAYS = 28
+TREE_REGROW_DAYS = 1
+TREE_TILES = 9              # tiles reserved per tree planted outdoors
+GREENHOUSE_TREE_SLOTS = 18  # the greenhouse's dedicated tree ring
+
+FARM_CROP_CAPACITY = 3427   # tillable squares on the standard farm map
+GREENHOUSE_CAPACITY = 120   # tillable squares inside the greenhouse
 # -----------------------------------------------------------------------------
 
 # skill -> {level 5 profession: [level 10 options for that profession]}
@@ -90,6 +143,7 @@ class Settings:
     botanist: bool = False         # all truffles are iridium quality
     tiller: bool = False           # +10% crop sell price
     agriculturist: bool = False    # -10% crop growth/regrowth time
+    winter: bool = False           # outdoor pigs can't dig for truffles in winter
 
 
 def read_int(var, default=0):
@@ -115,6 +169,15 @@ def clamp_counts(counts, capacity, edited=None):
         others = sum(counts) - counts[i]
         counts[i] = max(0, min(counts[i], capacity - others))
     return counts
+
+
+def clamp_tile_counts(counts, tile_costs, capacity, edited=None):
+    """Like clamp_counts, but each row may consume more than 1 tile per unit
+    (e.g. a fruit tree takes 9 tiles). Returns the clamped *unit* count per
+    row -- clamping happens in tile-space, then converts back by floor
+    division so a row never ends up owning a fractional tree."""
+    tiles = clamp_counts([n * c for n, c in zip(counts, tile_costs)], capacity, edited)
+    return [t // c if c else 0 for t, c in zip(tiles, tile_costs)]
 
 
 def load_table():
@@ -166,6 +229,8 @@ def profit_events(animal, start_friendship, s):
     friendship = np.minimum(1000, start_friendship + FRIENDSHIP_GAIN_PER_DAY * (DAYS - 1))
 
     if animal == "Pig":
+        if s.winter:
+            return DAYS, np.zeros_like(friendship)  # no grass to dig truffles from
         # Truffle quality comes from Foraging level/Botanist, not friendship.
         # First truffle is ~certain each day; each extra has chance friendship/1500
         # (expected 1/(1-p) truffles). Gatherer adds a 20% double-harvest chance.
@@ -195,28 +260,129 @@ def grow_time(days, s):
     return max(1, round(days * 0.9)) if s.agriculturist else days
 
 
+def is_tree(name):
+    return name in FRUIT_TREES
+
+
+def crop_info(name):
+    """Normalized (category, sell price, seed/sapling cost, growth days,
+    regrow days or None, seasons) for anything plantable -- a regular crop,
+    flower, or seed, or a fruit tree (always "Fruit", always the same
+    maturity/regrow timing)."""
+    if is_tree(name):
+        sell_price, seed_cost, seasons = FRUIT_TREES[name]
+        return ("Fruit", sell_price, seed_cost, TREE_MATURITY_DAYS, TREE_REGROW_DAYS, seasons)
+    return CROPS[name]
+
+
 def harvestable_crops(season):
-    """Crops that grow in `season` and can produce at least one harvest
-    within a 28-day month."""
-    return [c for c, info in CROPS.items() if info[3] == season and info[1] <= len(DAYS)]
+    """Crops (not trees) that grow in `season` and can produce at least one
+    harvest within a 28-day month."""
+    return [c for c, info in CROPS.items() if season in info[5] and info[3] <= len(DAYS)]
 
 
-def crop_events(crop, replace, s):
-    """Days (within DAYS) one planted crop produces, and the sell value on
-    each of those days. Regrowable crops keep producing every regrow_days;
-    non-regrowable crops are harvested once unless `replace` re-plants them
-    immediately, repeating the full growth cycle for the rest of the month."""
-    sell_price, growth_days, regrow_days, _season = CROPS[crop]
+def harvestable_crops_any_season():
+    """Crops (not trees) that can produce at least one harvest within a
+    28-day month, regardless of season -- the greenhouse grows year-round."""
+    return [c for c, info in CROPS.items() if info[3] <= len(DAYS)]
+
+
+def harvestable_trees(season):
+    """Fruit trees that fruit in `season`."""
+    return [t for t, info in FRUIT_TREES.items() if season in info[2]]
+
+
+def harvestable_trees_any_season():
+    """All fruit trees -- the greenhouse's dedicated tree ring fruits them
+    in any season."""
+    return list(FRUIT_TREES)
+
+
+def processing_methods(name):
+    """Ways to sell this crop/tree: always Raw, plus Keg and Preserves Jar
+    for Vegetables/Fruits (unless excluded), plus Dehydrator for Fruits, plus
+    Oil Maker for the handful of crops that specifically support it."""
+    category = crop_info(name)[0]
+    methods = ["Raw"]
+    if category in ("Vegetable", "Fruit"):
+        methods.append("Keg")
+        if name not in NO_PRESERVES_JAR:
+            methods.append("Preserves Jar")
+    if category == "Fruit":
+        methods.append("Dehydrator")
+    if name in OIL_MAKER_PRICE:
+        methods.append("Oil Maker")
+    return methods
+
+
+def processing_price(name, method, s):
+    """Sell price for one unit of `name` through the given method. Tiller's
+    +10% applies only to raw crops; Artisan's +40% applies only to goods made
+    in a machine -- they never both apply to the same item, just like the
+    equivalent Rancher/Artisan split for animal products."""
+    category, raw_price, *_ = crop_info(name)
+    if method == "Raw":
+        return raw_price * (1.1 if s.tiller else 1.0)
+
+    artisan_mult = 1.4 if s.profession == "Artisan" else 1.0
+    if method == "Keg":
+        if name in KEG_FIXED_PRICE:
+            return KEG_FIXED_PRICE[name] * artisan_mult
+        return raw_price * (3.0 if category == "Fruit" else 2.25) * artisan_mult
+    if method == "Preserves Jar":
+        return (raw_price * 2 + 50) * artisan_mult  # Jam/Pickles
+    if method == "Oil Maker":
+        return OIL_MAKER_PRICE[name] * artisan_mult
+    return raw_price * 1.5 * artisan_mult  # Dehydrator: Dried Fruit/Raisins (5 fruit -> 1, averaged per unit)
+
+
+def processing_days(name, method):
+    """Approximate in-game days for a machine to finish the job (actual times
+    vary per item in the real game; these are rounded wiki-average assumptions,
+    edit freely). Raw crops sell instantly."""
+    if method == "Raw":
+        return 0
+    if method == "Keg":
+        if name in KEG_FIXED_PRICE:
+            return 2   # Beer / Pale Ale
+        return 8 if crop_info(name)[0] == "Fruit" else 5  # Wine vs Juice
+    if method == "Preserves Jar":
+        return 3
+    return 1  # Oil Maker / Dehydrator
+
+
+def crop_events(name, replace, method, s):
+    """Days (within DAYS) one planted crop/tree's goods actually sell on --
+    harvest day plus however long the chosen processing method takes -- and
+    the net value (sell price minus any seed/sapling cost) on each of those
+    days. Regrowable plants (and fruit trees, once mature) keep producing
+    every regrow_days off a single seed/sapling purchase; non-regrowable
+    crops are harvested once unless `replace` re-plants them immediately (a
+    fresh seed purchase each cycle), repeating the full growth cycle for the
+    rest of the month. A harvest whose processing wouldn't finish by day 28
+    earns no profit this month (it wasn't sold yet)."""
+    _category, _sell_price, seed_cost, growth_days, regrow_days, _seasons = crop_info(name)
     growth_days = grow_time(growth_days, s)
-    unit_price = sell_price * (1.1 if s.tiller else 1.0)
+    unit_price = processing_price(name, method, s)
+    delay = processing_days(name, method)
 
     if regrow_days is not None:
-        days = np.arange(growth_days, len(DAYS) + 1, grow_time(regrow_days, s))
+        harvest_days = np.arange(growth_days, len(DAYS) + 1, grow_time(regrow_days, s))
+        prices = np.full(len(harvest_days), unit_price)
+        if len(prices):
+            prices[0] -= seed_cost  # one seed/sapling bought up front
     elif replace:
-        days = np.arange(growth_days, len(DAYS) + 1, growth_days)
+        harvest_days = np.arange(growth_days, len(DAYS) + 1, growth_days)
+        prices = np.full(len(harvest_days), unit_price - seed_cost)  # a fresh seed each cycle
     else:
-        days = np.array([growth_days]) if growth_days <= len(DAYS) else np.array([], dtype=int)
-    return days, np.full(len(days), unit_price)
+        harvest_days = (np.array([growth_days]) if growth_days <= len(DAYS)
+                        else np.array([], dtype=int))
+        prices = np.full(len(harvest_days), unit_price - seed_cost)
+
+    sale_days = harvest_days + delay
+    prices = prices[sale_days <= len(DAYS)]
+    sale_days = sale_days[sale_days <= len(DAYS)]
+    return sale_days, prices
 
 
 class ScrollFrame(ttk.Frame):
@@ -279,7 +445,6 @@ class BuildingCard:
     def __init__(self, app, parent):
         self.app = app
         self.type = tk.StringVar(value="Coop")
-        self.prev_type = "Coop"
         self.rows = []  # SimpleNamespace(frame, animal, friendship, number, spin, combo)
 
         self.frame = ttk.Frame(parent, relief="groove", borderwidth=2, padding=6)
@@ -330,22 +495,15 @@ class BuildingCard:
         self.app.update_plot()
 
     def on_type_change(self):
+        """Switching type may make some housed animals invalid for it (e.g. a
+        Deluxe Barn's Pig moved to a plain Coop) -- just drop those rows
+        rather than blocking the change; anything still valid is kept and
+        clamped to the new capacity."""
         new = self.type.get()
         allowed = allowed_animals(new)
-        cap = BUILDINGS[new][2]
-        wrong = sorted({r.animal.get() for r in self.rows if r.animal.get() not in allowed})
-        if wrong or self.total() > cap:
-            reasons = []
-            if wrong:
-                reasons.append("can't house " + ", ".join(wrong))
-            if self.total() > cap:
-                reasons.append(f"only holds {cap} animals")
-            messagebox.showinfo("Can't change building",
-                                f"A {new} {' and '.join(reasons)}.\n"
-                                "Remove those animals first.")
-            self.type.set(self.prev_type)
-            return
-        self.prev_type = new
+        for row in [r for r in self.rows if r.animal.get() not in allowed]:
+            row.frame.destroy()
+            self.rows.remove(row)
         for r in self.rows:
             r.combo.config(values=allowed)
         self.refresh()
@@ -390,12 +548,140 @@ class BuildingCard:
         self.app.update_plot()
 
 
+class CropSection:
+    """A tile-capacity-limited group of crop/tree rows: used for the outdoor
+    farm (capacity = tillable squares, crops+trees limited to the current
+    season), the greenhouse (120 tiles, any crop regardless of season), and
+    the greenhouse's separate 18-slot tree ring. `tile_cost(name)` lets a
+    single section mix items with different space requirements, e.g. a fruit
+    tree taking 9 outdoor tiles per tree vs. 1 for a regular crop."""
+
+    def __init__(self, app, parent, title, capacity, crop_options, tile_cost=None):
+        self.app = app
+        self.capacity = capacity
+        self.crop_options = crop_options  # callable -> list of valid crop/tree names
+        self.tile_cost = tile_cost or (lambda name: 1)
+        self.rows = []  # SimpleNamespace(frame, crop, number, replace, method, spin, combo, ...)
+
+        self.box = ttk.LabelFrame(parent, text=title, padding=6)
+        self.box.pack(fill="x", pady=(8, 0))
+        top = ttk.Frame(self.box)
+        top.pack(fill="x")
+        self.add_btn = ttk.Button(top, text="+  Add crop", command=self.add_crop)
+        self.add_btn.pack(side="left")
+        self.count_label = ttk.Label(top, width=16)
+        self.count_label.pack(side="left", padx=6)
+        self.crop_frame = ttk.Frame(self.box)
+        self.crop_frame.pack(fill="x", pady=(4, 0))
+
+    def counts(self):
+        return [max(0, read_int(r.number)) for r in self.rows]
+
+    def tile_costs(self):
+        return [self.tile_cost(r.crop.get()) for r in self.rows]
+
+    def total(self):
+        """Tiles currently in use (not raw unit count)."""
+        return sum(n * c for n, c in zip(self.counts(), self.tile_costs()))
+
+    def refresh(self, edited=None):
+        """Enforce the tile-capacity cap and update the counter / Add button."""
+        index = self.rows.index(edited) if edited in self.rows else None
+        costs = self.tile_costs()
+        counts = clamp_tile_counts(self.counts(), costs, self.capacity, index)
+        for r, n in zip(self.rows, counts):
+            if read_int(r.number) != n:
+                r.number.set(n)
+        used = sum(n * c for n, c in zip(counts, costs))
+        for r, n, c in zip(self.rows, counts, costs):
+            r.spin.config(to=max(1, (self.capacity - (used - n * c)) // c))
+        self.count_label.config(text=f"{used}/{self.capacity} tiles")
+        self.add_btn.config(state="normal" if used < self.capacity else "disabled")
+
+    def on_numbers_change(self, row):
+        self.refresh(edited=row)
+        self.app.update_plot()
+
+    def add_crop(self):
+        if self.total() >= self.capacity:
+            return
+        options = self.crop_options()
+        if not options:
+            messagebox.showinfo("No crops", "No crops are available here right now.")
+            return
+        frame = ttk.Frame(self.crop_frame)
+        frame.pack(fill="x", pady=2)
+        crop = tk.StringVar(value=options[0])
+        number = tk.IntVar(value=1)
+        replace = tk.BooleanVar(value=False)
+        method = tk.StringVar(value="Raw")
+
+        room = max(1, (self.capacity - self.total()) // self.tile_cost(options[0]))
+        spin = tk.Spinbox(frame, textvariable=number, from_=1, to=room, width=5,
+                          command=lambda: self.on_numbers_change(row))
+        spin.pack(side="left")
+        spin.bind("<KeyRelease>", lambda e: self.on_numbers_change(row))
+        ttk.Label(frame, text="×").pack(side="left", padx=2)
+
+        combo = ttk.Combobox(frame, textvariable=crop, values=options, state="readonly", width=12)
+        combo.pack(side="left")
+
+        method_combo = ttk.Combobox(frame, textvariable=method, state="readonly", width=12)
+        method_combo.pack(side="left", padx=(4, 0))
+        method_combo.bind("<<ComboboxSelected>>", lambda e: self.app.update_plot())
+
+        check = ttk.Checkbutton(frame, text="Replace", variable=replace, command=self.app.update_plot)
+        check.pack(side="left", padx=(6, 0))
+
+        row = SimpleNamespace(frame=frame, crop=crop, number=number, replace=replace, method=method,
+                              spin=spin, combo=combo, method_combo=method_combo, check=check)
+        combo.bind("<<ComboboxSelected>>", lambda e: (self.refresh_crop_row(row), self.on_numbers_change(row)))
+        ttk.Button(frame, text="✕", width=3,
+                   command=lambda: self.remove_crop(row)).pack(side="left", padx=(6, 0))
+        self.rows.append(row)
+        self.refresh_crop_row(row)
+        self.refresh()
+        self.app.update_plot()
+
+    def refresh_crop_row(self, row):
+        """A regrowing crop (or a mature fruit tree) keeps producing on its
+        own, so "Replace" only applies to (and is only enabled for)
+        one-and-done crops. The processing dropdown's options depend on which
+        methods this crop supports (e.g. Wheat/Hops have no Preserves Jar)."""
+        regrows = crop_info(row.crop.get())[4] is not None
+        if regrows:
+            row.replace.set(False)
+        row.check.config(state="disabled" if regrows else "normal")
+
+        methods = processing_methods(row.crop.get())
+        row.method_combo.config(values=methods)
+        if row.method.get() not in methods:
+            row.method.set("Raw")
+
+    def remove_crop(self, row):
+        row.frame.destroy()
+        self.rows.remove(row)
+        self.refresh()
+        self.app.update_plot()
+
+    def refresh_options(self):
+        """Call when the valid crop list changes (e.g. a season switch): drop
+        rows whose crop no longer qualifies, and refresh the rest's dropdown."""
+        options = self.crop_options()
+        for row in [r for r in self.rows if r.crop.get() not in options]:
+            row.frame.destroy()
+            self.rows.remove(row)
+        for row in self.rows:
+            row.combo.config(values=options)
+        self.refresh()
+        self.app.update_plot()
+
+
 class App:
     def __init__(self, root):
         root.title("Stardew Animal Profit")
-        root.geometry("1180x760")
+        root.geometry("1280x920")
         self.buildings = []
-        self.crops = []
 
         # ---- left: buildings and their animals ----
         left = ttk.Frame(root, padding=8)
@@ -409,23 +695,35 @@ class App:
         self.scroll = ScrollFrame(left, width=450)
         self.scroll.pack(fill="both", expand=True, pady=(4, 0))
 
-        # ---- left, below buildings: season and crops ----
-        crop_box = ttk.LabelFrame(left, text="Crops", padding=6)
-        crop_box.pack(fill="x", pady=(8, 0))
-        season_row = ttk.Frame(crop_box)
-        season_row.pack(fill="x")
+        # ---- left, below buildings: season, outdoor crops, and greenhouse ----
+        season_row = ttk.Frame(left)
+        season_row.pack(fill="x", pady=(8, 0))
         ttk.Label(season_row, text="Season:").pack(side="left")
         self.season = tk.StringVar(value="Spring")
         season_combo = ttk.Combobox(season_row, textvariable=self.season, values=SEASONS,
                                     state="readonly", width=10)
         season_combo.pack(side="left", padx=(4, 0))
         season_combo.bind("<<ComboboxSelected>>", lambda e: self.on_season_change())
-        ttk.Button(crop_box, text="+  Add crop", command=self.add_crop).pack(anchor="w", pady=(6, 0))
-        ttk.Label(crop_box, text="Rows: number \u00d7 crop; \u201cReplace\u201d replants "
-                                 "one-and-done crops immediately after harvest").pack(
-            anchor="w", pady=(6, 0))
-        self.crop_frame = ttk.Frame(crop_box)
-        self.crop_frame.pack(fill="x", pady=(4, 0))
+
+        # Fruit trees share the same 3427-tile farm budget as regular crops
+        # outdoors (9 tiles each), so they're options within the one section.
+        self.farm_crops = CropSection(
+            self, left, "Crops (outdoor)", FARM_CROP_CAPACITY,
+            lambda: harvestable_crops(self.season.get()) + harvestable_trees(self.season.get()),
+            tile_cost=lambda name: TREE_TILES if is_tree(name) else 1)
+        self.greenhouse = CropSection(
+            self, left, "Greenhouse (any season)", GREENHOUSE_CAPACITY,
+            lambda: harvestable_crops_any_season())
+        # The greenhouse's fruit trees live in its own dedicated 18-slot ring,
+        # entirely separate from its 120 regular crop tiles.
+        self.greenhouse_trees = CropSection(
+            self, left, "Greenhouse fruit trees", GREENHOUSE_TREE_SLOTS,
+            lambda: harvestable_trees_any_season())
+        ttk.Label(left, wraplength=430, text=(
+            "Rows: number \u00d7 crop \u00d7 sell as Raw/Keg/Preserves Jar/Oil Maker/Dehydrator; "
+            "\u201cReplace\u201d replants one-and-done crops immediately after harvest. "
+            "Seed/sapling cost is already subtracted from profit.")
+        ).pack(anchor="w", pady=(6, 0))
 
         # ---- right: graph on top, skills underneath ----
         right = ttk.Frame(root)
@@ -452,7 +750,7 @@ class App:
 
         # Start with one Coop holding a chicken and one crop so the graph isn't empty
         self.add_building().add_animal()
-        self.add_crop()
+        self.farm_crops.add_crop()
 
     def settings(self):
         farming, foraging = self.skills["Farming"], self.skills["Foraging"]
@@ -471,6 +769,7 @@ class App:
             botanist=foraging.p10.get() == "Botanist",
             tiller=farming.p5.get() == "Tiller",
             agriculturist=farming.p10.get() == "Agriculturist",
+            winter=self.season.get() == "Winter",
         )
 
     def add_building(self):
@@ -484,59 +783,9 @@ class App:
         self.buildings.remove(card)
         self.update_plot()
 
-    def add_crop(self):
-        options = harvestable_crops(self.season.get())
-        if not options:
-            messagebox.showinfo("No crops",
-                                f"No crops can be harvested in {self.season.get()}.")
-            return
-        frame = ttk.Frame(self.crop_frame)
-        frame.pack(fill="x", pady=2)
-        crop = tk.StringVar(value=options[0])
-        number = tk.IntVar(value=1)
-        replace = tk.BooleanVar(value=False)
-
-        spin = tk.Spinbox(frame, textvariable=number, from_=1, to=999, width=4,
-                          command=self.update_plot)
-        spin.pack(side="left")
-        spin.bind("<KeyRelease>", lambda e: self.update_plot())
-        ttk.Label(frame, text="\u00d7").pack(side="left", padx=2)
-
-        combo = ttk.Combobox(frame, textvariable=crop, values=options, state="readonly", width=12)
-        combo.pack(side="left")
-
-        check = ttk.Checkbutton(frame, text="Replace", variable=replace, command=self.update_plot)
-        check.pack(side="left", padx=(6, 0))
-
-        row = SimpleNamespace(frame=frame, crop=crop, number=number, replace=replace,
-                              spin=spin, combo=combo, check=check)
-        combo.bind("<<ComboboxSelected>>", lambda e: (self.refresh_crop_row(row), self.update_plot()))
-        ttk.Button(frame, text="\u2715", width=3,
-                   command=lambda: self.remove_crop(row)).pack(side="left", padx=(6, 0))
-        self.crops.append(row)
-        self.refresh_crop_row(row)
-        self.update_plot()
-
-    def refresh_crop_row(self, row):
-        """A regrowing crop keeps producing on its own, so "Replace" only
-        applies to (and is only enabled for) one-and-done crops."""
-        regrows = CROPS[row.crop.get()][2] is not None
-        if regrows:
-            row.replace.set(False)
-        row.check.config(state="disabled" if regrows else "normal")
-
-    def remove_crop(self, row):
-        row.frame.destroy()
-        self.crops.remove(row)
-        self.update_plot()
-
     def on_season_change(self):
-        for row in list(self.crops):
-            row.frame.destroy()
-        self.crops.clear()
-        if harvestable_crops(self.season.get()):
-            self.add_crop()
-        self.update_plot()
+        # Only the outdoor crops are season-locked; the greenhouse is unaffected.
+        self.farm_crops.refresh_options()
 
     def update_plot(self):
         s = self.settings()
@@ -556,15 +805,20 @@ class App:
                                        f"{row.animal.get()} (start {row.friendship.get()})"))
                 total[days - 1] += y
                 plotted += 1
-        for row in self.crops:
-            count = read_int(row.number, 0)
-            crop = row.crop.get()
-            days, per_event = crop_events(crop, row.replace.get(), s)
-            y = count * per_event
-            label = f"{count} × {crop}" + (" (replace)" if row.replace.get() else "")
-            self.ax.scatter(days, y, s=18, label=label)
-            total[days - 1] += y
-            plotted += 1
+        sections = (("", self.farm_crops), ("Greenhouse: ", self.greenhouse),
+                   ("Greenhouse: ", self.greenhouse_trees))
+        for section_label, section in sections:
+            for row in section.rows:
+                count = read_int(row.number, 0)
+                crop, method = row.crop.get(), row.method.get()
+                days, per_event = crop_events(crop, row.replace.get(), method, s)
+                y = count * per_event
+                label = (f"{section_label}{count} × {crop}"
+                        + (f" ({method})" if method != "Raw" else "")
+                        + (" (replace)" if row.replace.get() else ""))
+                self.ax.scatter(days, y, s=18, label=label)
+                total[days - 1] += y
+                plotted += 1
         if plotted:
             self.ax.plot(DAYS, total, label="Total profit", color="black",
                         linewidth=2, marker="o", markersize=4, zorder=0)
