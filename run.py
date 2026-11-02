@@ -126,18 +126,17 @@ GREENHOUSE_CAPACITY = 120   # tillable squares inside the greenhouse
 # -----------------------------------------------------------------------------
 
 # skill -> {level 5 profession: [level 10 options for that profession]}
+# Foraging isn't modeled as a level-gated tree -- only Gatherer/Botanist ever
+# affected anything here, so they're plain checkboxes (see App.__init__).
 PROFESSIONS = {
-    "Farming":  {"Rancher": ["Coopmaster", "Shepherd"],
-                 "Tiller": ["Artisan", "Agriculturist"]},
-    "Foraging": {"Forester": ["Lumberjack", "Tapper"],
-                 "Gatherer": ["Botanist", "Tracker"]},
+    "Farming": {"Rancher": ["Coopmaster", "Shepherd"],
+                "Tiller": ["Artisan", "Agriculturist"]},
 }
 
 
 @dataclass
 class Settings:
     profession: str = "None"       # Farming profession that matters: None / Rancher / Artisan
-    process: bool = True           # sell processed goods (True) or raw products (False)
     foraging_level: int = 0
     gatherer: bool = False         # 20% chance of a double truffle
     botanist: bool = False         # all truffles are iridium quality
@@ -221,10 +220,12 @@ def forage_quality_probs(level, botanist):
     return {"Regular": 1 - gold - silver, "Silver": silver, "Gold": gold}
 
 
-def profit_events(animal, start_friendship, s):
+def profit_events(animal, start_friendship, process, s):
     """Days (within DAYS) this animal actually produces, and the expected profit
     on each of those days specifically (not averaged across the production
-    interval, e.g. a duck's full expected egg value lands only every other day)."""
+    interval, e.g. a duck's full expected egg value lands only every other day).
+    `process` is this row's own Process checkbox (mayo/cheese/cloth/truffle oil
+    vs. raw), set per animal rather than globally."""
     product, interval, _, _ = ANIMALS[animal]
     friendship = np.minimum(1000, start_friendship + FRIENDSHIP_GAIN_PER_DAY * (DAYS - 1))
 
@@ -237,7 +238,7 @@ def profit_events(animal, start_friendship, s):
         p_extra = friendship / 1500
         truffles = 1 / (1 - p_extra) * (1.2 if s.gatherer else 1.0)
         per_truffle = sum(
-            prob * value(s.profession, product, q, s.process)
+            prob * value(s.profession, product, q, process)
             for q, prob in forage_quality_probs(s.foraging_level, s.botanist).items()
         )
         return DAYS, truffles * per_truffle  # pigs can produce truffles every day
@@ -247,9 +248,9 @@ def profit_events(animal, start_friendship, s):
     p_silver = (1 - p_gold) * chance
     p_regular = 1 - p_gold - p_silver
     per_product = (
-        p_regular * value(s.profession, product, "Regular", s.process)
-        + p_silver * value(s.profession, product, "Silver", s.process)
-        + p_gold * value(s.profession, product, "Gold", s.process)
+        p_regular * value(s.profession, product, "Regular", process)
+        + p_silver * value(s.profession, product, "Silver", process)
+        + p_gold * value(s.profession, product, "Gold", process)
     )
     mask = DAYS % interval == 0
     return DAYS[mask], per_product[mask]
@@ -353,14 +354,16 @@ def processing_days(name, method):
 
 def crop_events(name, replace, method, s):
     """Days (within DAYS) one planted crop/tree's goods actually sell on --
-    harvest day plus however long the chosen processing method takes -- and
-    the net value (sell price minus any seed/sapling cost) on each of those
-    days. Regrowable plants (and fruit trees, once mature) keep producing
-    every regrow_days off a single seed/sapling purchase; non-regrowable
-    crops are harvested once unless `replace` re-plants them immediately (a
-    fresh seed purchase each cycle), repeating the full growth cycle for the
-    rest of the month. A harvest whose processing wouldn't finish by day 28
-    earns no profit this month (it wasn't sold yet)."""
+    harvest day plus however long the chosen processing method takes -- the
+    net value (sell price minus any seed/sapling cost) on each of those days,
+    and the total value of everything harvested this month even if some of
+    it is still mid-process past day 28 (harvesting itself can't happen after
+    day 28, but a Keg/Jar that's still running still holds real value).
+    Regrowable plants (and fruit trees, once mature) keep producing every
+    regrow_days off a single seed/sapling purchase; non-regrowable crops are
+    harvested once unless `replace` re-plants them immediately (a fresh seed
+    purchase each cycle), repeating the full growth cycle for the rest of
+    the month."""
     _category, _sell_price, seed_cost, growth_days, regrow_days, _seasons = crop_info(name)
     growth_days = grow_time(growth_days, s)
     unit_price = processing_price(name, method, s)
@@ -379,10 +382,10 @@ def crop_events(name, replace, method, s):
                         else np.array([], dtype=int))
         prices = np.full(len(harvest_days), unit_price - seed_cost)
 
+    harvest_total = prices.sum()  # full value of this month's harvests, pending or not
     sale_days = harvest_days + delay
-    prices = prices[sale_days <= len(DAYS)]
-    sale_days = sale_days[sale_days <= len(DAYS)]
-    return sale_days, prices
+    in_month = sale_days <= len(DAYS)
+    return sale_days[in_month], prices[in_month], harvest_total
 
 
 class ScrollFrame(ttk.Frame):
@@ -518,6 +521,7 @@ class BuildingCard:
         animal = tk.StringVar(value=allowed[0])
         friendship = tk.IntVar(value=500)
         number = tk.IntVar(value=1)
+        process = tk.BooleanVar(value=True)
 
         spin = tk.Spinbox(frame, textvariable=number, from_=1, to=self.capacity(), width=4,
                           command=lambda: self.on_numbers_change(row))
@@ -528,16 +532,32 @@ class BuildingCard:
         combo = ttk.Combobox(frame, textvariable=animal, values=allowed,
                              state="readonly", width=12)
         combo.pack(side="left")
-        combo.bind("<<ComboboxSelected>>", lambda e: self.app.update_plot())
+
+        product_label = ttk.Label(frame, width=12)
+        product_label.pack(side="left", padx=(4, 0))
 
         tk.Scale(frame, variable=friendship, from_=0, to=1000, orient="horizontal",
                  length=130, command=lambda v: self.app.update_plot()).pack(side="left", padx=4)
 
-        row = SimpleNamespace(frame=frame, animal=animal, friendship=friendship,
-                              number=number, spin=spin, combo=combo)
+        ttk.Checkbutton(frame, text="Process", variable=process,
+                        command=self.app.update_plot).pack(side="left", padx=(4, 0))
+
+        profit_label = ttk.Label(frame, width=14, anchor="e")
+        profit_label.pack(side="left", padx=(4, 0))
+
+        row = SimpleNamespace(frame=frame, animal=animal, friendship=friendship, number=number,
+                              process=process, spin=spin, combo=combo,
+                              product_label=product_label, profit_label=profit_label)
+        combo.bind("<<ComboboxSelected>>", lambda e: self.on_animal_change(row))
         ttk.Button(frame, text="\u2715", width=3,
                    command=lambda: self.remove_animal(row)).pack(side="left")
         self.rows.append(row)
+        self.on_animal_change(row)
+
+    def on_animal_change(self, row):
+        """Show what product this animal makes right next to the dropdown,
+        e.g. Chicken -> Egg, Pig -> Truffle."""
+        row.product_label.config(text=ANIMALS[row.animal.get()][0])
         self.refresh()
         self.app.update_plot()
 
@@ -633,8 +653,12 @@ class CropSection:
         check = ttk.Checkbutton(frame, text="Replace", variable=replace, command=self.app.update_plot)
         check.pack(side="left", padx=(6, 0))
 
+        profit_label = ttk.Label(frame, width=14, anchor="e")
+        profit_label.pack(side="left", padx=(4, 0))
+
         row = SimpleNamespace(frame=frame, crop=crop, number=number, replace=replace, method=method,
-                              spin=spin, combo=combo, method_combo=method_combo, check=check)
+                              spin=spin, combo=combo, method_combo=method_combo, check=check,
+                              profit_label=profit_label)
         combo.bind("<<ComboboxSelected>>", lambda e: (self.refresh_crop_row(row), self.on_numbers_change(row)))
         ttk.Button(frame, text="✕", width=3,
                    command=lambda: self.remove_crop(row)).pack(side="left", padx=(6, 0))
@@ -687,11 +711,10 @@ class App:
         left = ttk.Frame(root, padding=8)
         left.pack(side="left", fill="y")
         ttk.Button(left, text="+  Add building", command=self.add_building).pack(anchor="w")
-        self.process = tk.BooleanVar(value=True)
-        ttk.Checkbutton(left, text="Process products (mayo, cheese, cloth...)",
-                        variable=self.process, command=self.update_plot).pack(anchor="w", pady=(6, 0))
-        ttk.Label(left, text="Rows: number \u00d7 animal, starting friendship (0-1000)").pack(
-            anchor="w", pady=(8, 0))
+        ttk.Label(left, wraplength=430, text=(
+            "Rows: number \u00d7 animal, starting friendship (0-1000); Process = sell "
+            "mayo/cheese/cloth/truffle oil instead of raw")
+        ).pack(anchor="w", pady=(8, 0))
         self.scroll = ScrollFrame(left, width=450)
         self.scroll.pack(fill="both", expand=True, pady=(4, 0))
 
@@ -735,13 +758,33 @@ class App:
             "Farming: Rancher (+20% animal products) or Tiller (+10% crops); "
             "Tiller's level 10 options are Artisan (+40% artisan/processed goods) "
             "or Agriculturist (-10% crop growth/regrowth time).\n"
-            "Foraging: only affects pigs' truffles (Gatherer = more truffles, "
-            "Botanist = iridium quality).")
+            "Foraging: Gatherer (20% more truffles) and Botanist (iridium-quality "
+            "truffles, requires Gatherer) -- only affect pigs' truffles.")
         ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
         for col, text in enumerate(["Skill", "Level 5", "Level 10"]):
             ttk.Label(skills_box, text=text).grid(row=1, column=col, sticky="w")
         self.skills = {name: SkillRow(skills_box, name, i + 2, self.update_plot)
                        for i, name in enumerate(PROFESSIONS)}
+
+        # Foraging has no level-gated tree here -- just the two checkboxes that
+        # ever mattered, with Botanist requiring Gatherer first (as in-game).
+        foraging_row = len(PROFESSIONS) + 2
+        ttk.Label(skills_box, text="Foraging").grid(row=foraging_row, column=0, sticky="w", padx=(0, 6))
+        self.gatherer = tk.BooleanVar(value=False)
+        self.botanist = tk.BooleanVar(value=False)
+        ttk.Checkbutton(skills_box, text="Gatherer", variable=self.gatherer,
+                        command=self.on_gatherer_change).grid(row=foraging_row, column=1, sticky="w")
+        self.botanist_check = ttk.Checkbutton(skills_box, text="Botanist", variable=self.botanist,
+                                              state="disabled", command=self.update_plot)
+        self.botanist_check.grid(row=foraging_row, column=2, sticky="w")
+
+        # ---- totals, above the graph ----
+        totals = ttk.Frame(right)
+        totals.pack(side="top", fill="x", padx=8, pady=(8, 0))
+        self.month_total_label = ttk.Label(totals, font=("", 11, "bold"))
+        self.month_total_label.pack(side="left")
+        self.pending_total_label = ttk.Label(totals, font=("", 11, "bold"))
+        self.pending_total_label.pack(side="left", padx=(20, 0))
 
         self.fig = Figure(figsize=(7, 4.5), tight_layout=True)
         self.ax = self.fig.add_subplot(111)
@@ -752,21 +795,29 @@ class App:
         self.add_building().add_animal()
         self.farm_crops.add_crop()
 
+    def on_gatherer_change(self):
+        """Botanist requires Gatherer, just like the real profession tree."""
+        if not self.gatherer.get():
+            self.botanist.set(False)
+        self.botanist_check.config(state="normal" if self.gatherer.get() else "disabled")
+        self.update_plot()
+
     def settings(self):
-        farming, foraging = self.skills["Farming"], self.skills["Foraging"]
+        farming = self.skills["Farming"]
         if farming.p10.get() == "Artisan":
             profession = "Artisan"
         elif farming.p5.get() == "Rancher":
             profession = "Rancher"
         else:
             profession = "None"
-        foraging_level = 10 if foraging.p10.get() != NONE else 5 if foraging.p5.get() != NONE else 0
+        # Gatherer implies Foraging level 5+, Botanist implies level 10 --
+        # inferred since there's no numeric level slider, only the checkboxes.
+        foraging_level = 10 if self.botanist.get() else 5 if self.gatherer.get() else 0
         return Settings(
             profession=profession,
-            process=self.process.get(),
             foraging_level=foraging_level,
-            gatherer=foraging.p5.get() == "Gatherer",
-            botanist=foraging.p10.get() == "Botanist",
+            gatherer=self.gatherer.get(),
+            botanist=self.botanist.get(),
             tiller=farming.p5.get() == "Tiller",
             agriculturist=farming.p10.get() == "Agriculturist",
             winter=self.season.get() == "Winter",
@@ -793,15 +844,18 @@ class App:
         seen = {}  # numbering for buildings of the same type: "Coop 1", "Coop 2"
         plotted = 0
         total = np.zeros(len(DAYS))
+        pending_extra = 0.0  # crop/tree value still mid-processing past day 28
         for card in self.buildings:
             btype = card.type.get()
             seen[btype] = seen.get(btype, 0) + 1
             for row in card.rows:
                 count = read_int(row.number, 0)
-                days, per_event = profit_events(row.animal.get(), row.friendship.get(), s)
+                days, per_event = profit_events(row.animal.get(), row.friendship.get(),
+                                                row.process.get(), s)
+                row.profit_label.config(text=f"{per_event.sum():,.0f}g/ea")
                 y = count * per_event
                 self.ax.scatter(days, y, s=18,
-                                label=(f"{btype} {seen[btype]}: {count} \u00d7 "
+                                label=(f"{btype} {seen[btype]}: {count} × "
                                        f"{row.animal.get()} (start {row.friendship.get()})"))
                 total[days - 1] += y
                 plotted += 1
@@ -811,13 +865,15 @@ class App:
             for row in section.rows:
                 count = read_int(row.number, 0)
                 crop, method = row.crop.get(), row.method.get()
-                days, per_event = crop_events(crop, row.replace.get(), method, s)
+                days, per_event, harvest_total = crop_events(crop, row.replace.get(), method, s)
+                row.profit_label.config(text=f"{per_event.sum():,.0f}g/ea")
                 y = count * per_event
                 label = (f"{section_label}{count} × {crop}"
                         + (f" ({method})" if method != "Raw" else "")
                         + (" (replace)" if row.replace.get() else ""))
                 self.ax.scatter(days, y, s=18, label=label)
                 total[days - 1] += y
+                pending_extra += count * (harvest_total - per_event.sum())
                 plotted += 1
         if plotted:
             self.ax.plot(DAYS, total, label="Total profit", color="black",
@@ -836,6 +892,11 @@ class App:
         else:
             msg = "Add animals to a building" if self.buildings else "Click + to add a building"
             self.ax.text(0.5, 0.5, msg, ha="center", va="center", transform=self.ax.transAxes)
+
+        month_total = total.sum()
+        self.month_total_label.config(text=f"Total this month: {month_total:,.0f}g")
+        self.pending_total_label.config(
+            text=f"Total profit (incl. pending processing): {month_total + pending_extra:,.0f}g")
         self.canvas.draw_idle()
 
 
