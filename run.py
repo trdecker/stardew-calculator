@@ -40,6 +40,36 @@ ANIMALS = {
 FRIENDSHIP_GAIN_PER_DAY = 15   # friendship points gained each day
 # Chance wool gives 2 cloth (from the wiki page)
 WOOL_TWO_CLOTH = {"Regular": 0.0, "Silver": 0.1, "Gold": 0.5, "Iridium": 1.0}
+
+SEASONS = ("Spring", "Summer", "Fall", "Winter")
+# crop -> (sell price, days to first harvest, days between regrowths or None
+# if it's a one-and-done harvest, season). Assumes 1 unit sold per harvest
+# (ignores per-harvest extra-yield mechanics like Blueberry's 3-per-harvest).
+# Winter has no standard outdoor crops, so it's left empty.
+CROPS = {
+    "Parsnip":     (35, 4, None, "Spring"),
+    "Green Bean":  (40, 10, 3, "Spring"),
+    "Cauliflower": (175, 12, None, "Spring"),
+    "Potato":      (80, 6, None, "Spring"),
+    "Garlic":      (60, 4, None, "Spring"),
+    "Kale":        (110, 6, None, "Spring"),
+    "Strawberry":  (120, 8, 4, "Spring"),
+    "Blueberry":   (50, 13, 4, "Summer"),
+    "Corn":        (50, 14, 4, "Summer"),
+    "Hops":        (25, 11, 1, "Summer"),
+    "Hot Pepper":  (40, 5, 3, "Summer"),
+    "Melon":       (250, 12, None, "Summer"),
+    "Radish":      (90, 6, None, "Summer"),
+    "Wheat":       (25, 4, None, "Summer"),
+    "Amaranth":    (150, 7, None, "Fall"),
+    "Artichoke":   (160, 8, None, "Fall"),
+    "Bok Choy":    (80, 4, None, "Fall"),
+    "Cranberries": (75, 7, 5, "Fall"),
+    "Eggplant":    (60, 5, 5, "Fall"),
+    "Grape":       (80, 10, 3, "Fall"),
+    "Pumpkin":     (320, 13, None, "Fall"),
+    "Yam":         (160, 10, None, "Fall"),
+}
 # -----------------------------------------------------------------------------
 
 # skill -> {level 5 profession: [level 10 options for that profession]}
@@ -58,6 +88,8 @@ class Settings:
     foraging_level: int = 0
     gatherer: bool = False         # 20% chance of a double truffle
     botanist: bool = False         # all truffles are iridium quality
+    tiller: bool = False           # +10% crop sell price
+    agriculturist: bool = False    # -10% crop growth/regrowth time
 
 
 def read_int(var, default=0):
@@ -158,6 +190,35 @@ def profit_events(animal, start_friendship, s):
     return DAYS[mask], per_product[mask]
 
 
+def grow_time(days, s):
+    """Agriculturist speeds up growth and regrowth by ~10%."""
+    return max(1, round(days * 0.9)) if s.agriculturist else days
+
+
+def harvestable_crops(season):
+    """Crops that grow in `season` and can produce at least one harvest
+    within a 28-day month."""
+    return [c for c, info in CROPS.items() if info[3] == season and info[1] <= len(DAYS)]
+
+
+def crop_events(crop, replace, s):
+    """Days (within DAYS) one planted crop produces, and the sell value on
+    each of those days. Regrowable crops keep producing every regrow_days;
+    non-regrowable crops are harvested once unless `replace` re-plants them
+    immediately, repeating the full growth cycle for the rest of the month."""
+    sell_price, growth_days, regrow_days, _season = CROPS[crop]
+    growth_days = grow_time(growth_days, s)
+    unit_price = sell_price * (1.1 if s.tiller else 1.0)
+
+    if regrow_days is not None:
+        days = np.arange(growth_days, len(DAYS) + 1, grow_time(regrow_days, s))
+    elif replace:
+        days = np.arange(growth_days, len(DAYS) + 1, growth_days)
+    else:
+        days = np.array([growth_days]) if growth_days <= len(DAYS) else np.array([], dtype=int)
+    return days, np.full(len(days), unit_price)
+
+
 class ScrollFrame(ttk.Frame):
     """A vertically scrollable area; put widgets in .inner"""
 
@@ -182,41 +243,33 @@ class ScrollFrame(ttk.Frame):
 
 
 class SkillRow:
-    """One skill: level slider plus level 5 / level 10 professions."""
+    """One skill: level 5 and level 10 profession choice."""
 
     def __init__(self, parent, name, row, on_change):
         self.tree = PROFESSIONS[name]
         self.on_change = on_change
-        self.level = tk.IntVar(value=0)
         self.p5 = tk.StringVar(value=NONE)
         self.p10 = tk.StringVar(value=NONE)
 
         ttk.Label(parent, text=name).grid(row=row, column=0, sticky="w", padx=(0, 6))
-        tk.Scale(parent, variable=self.level, from_=0, to=10, orient="horizontal",
-                 length=110, command=lambda v: self.refresh()).grid(row=row, column=1)
 
-        self.box5 = ttk.Combobox(parent, textvariable=self.p5, state="disabled", width=11,
+        self.box5 = ttk.Combobox(parent, textvariable=self.p5, state="readonly", width=11,
                                  values=[NONE] + list(self.tree))
-        self.box5.grid(row=row, column=2, padx=4)
+        self.box5.grid(row=row, column=1, padx=4)
         self.box5.bind("<<ComboboxSelected>>", lambda e: self.refresh())
 
         self.box10 = ttk.Combobox(parent, textvariable=self.p10, state="disabled", width=11,
                                   values=[NONE])
-        self.box10.grid(row=row, column=3)
+        self.box10.grid(row=row, column=2)
         self.box10.bind("<<ComboboxSelected>>", lambda e: self.on_change())
 
     def refresh(self):
-        level = self.level.get()
-        if level < 5:
-            self.p5.set(NONE)
-        self.box5.config(state="readonly" if level >= 5 else "disabled")
-
         # Level 10 options depend on the level 5 choice
         options = self.tree.get(self.p5.get(), [])
         self.box10.config(values=[NONE] + options)
-        if level < 10 or self.p10.get() not in options:
+        if self.p10.get() not in options:
             self.p10.set(NONE)
-        self.box10.config(state="readonly" if level >= 10 and options else "disabled")
+        self.box10.config(state="readonly" if options else "disabled")
         self.on_change()
 
 
@@ -340,8 +393,9 @@ class BuildingCard:
 class App:
     def __init__(self, root):
         root.title("Stardew Animal Profit")
-        root.geometry("1180x720")
+        root.geometry("1180x760")
         self.buildings = []
+        self.crops = []
 
         # ---- left: buildings and their animals ----
         left = ttk.Frame(root, padding=8)
@@ -355,6 +409,24 @@ class App:
         self.scroll = ScrollFrame(left, width=450)
         self.scroll.pack(fill="both", expand=True, pady=(4, 0))
 
+        # ---- left, below buildings: season and crops ----
+        crop_box = ttk.LabelFrame(left, text="Crops", padding=6)
+        crop_box.pack(fill="x", pady=(8, 0))
+        season_row = ttk.Frame(crop_box)
+        season_row.pack(fill="x")
+        ttk.Label(season_row, text="Season:").pack(side="left")
+        self.season = tk.StringVar(value="Spring")
+        season_combo = ttk.Combobox(season_row, textvariable=self.season, values=SEASONS,
+                                    state="readonly", width=10)
+        season_combo.pack(side="left", padx=(4, 0))
+        season_combo.bind("<<ComboboxSelected>>", lambda e: self.on_season_change())
+        ttk.Button(crop_box, text="+  Add crop", command=self.add_crop).pack(anchor="w", pady=(6, 0))
+        ttk.Label(crop_box, text="Rows: number \u00d7 crop; \u201cReplace\u201d replants "
+                                 "one-and-done crops immediately after harvest").pack(
+            anchor="w", pady=(6, 0))
+        self.crop_frame = ttk.Frame(crop_box)
+        self.crop_frame.pack(fill="x", pady=(4, 0))
+
         # ---- right: graph on top, skills underneath ----
         right = ttk.Frame(root)
         right.pack(side="right", fill="both", expand=True)
@@ -362,13 +434,13 @@ class App:
         skills_box = ttk.LabelFrame(right, text="Skills & professions", padding=6)
         skills_box.pack(side="bottom", fill="x", padx=8, pady=8)
         ttk.Label(skills_box, wraplength=420, text=(
-            "Level 5 and 10 unlock a profession choice.\n"
-            "Farming: Rancher (+20% animal products) or Artisan (+40% artisan goods, "
-            "needs Tiller).\n"
-            "Foraging: only affects pigs' truffles (level sets quality, Gatherer = "
-            "more truffles, Botanist = iridium).")
-        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
-        for col, text in enumerate(["Skill", "Level", "Level 5", "Level 10"]):
+            "Farming: Rancher (+20% animal products) or Tiller (+10% crops); "
+            "Tiller's level 10 options are Artisan (+40% artisan/processed goods) "
+            "or Agriculturist (-10% crop growth/regrowth time).\n"
+            "Foraging: only affects pigs' truffles (Gatherer = more truffles, "
+            "Botanist = iridium quality).")
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        for col, text in enumerate(["Skill", "Level 5", "Level 10"]):
             ttk.Label(skills_box, text=text).grid(row=1, column=col, sticky="w")
         self.skills = {name: SkillRow(skills_box, name, i + 2, self.update_plot)
                        for i, name in enumerate(PROFESSIONS)}
@@ -378,8 +450,9 @@ class App:
         self.canvas = FigureCanvasTkAgg(self.fig, master=right)
         self.canvas.get_tk_widget().pack(side="top", fill="both", expand=True)
 
-        # Start with one Coop holding a chicken so the graph isn't empty
+        # Start with one Coop holding a chicken and one crop so the graph isn't empty
         self.add_building().add_animal()
+        self.add_crop()
 
     def settings(self):
         farming, foraging = self.skills["Farming"], self.skills["Foraging"]
@@ -389,12 +462,15 @@ class App:
             profession = "Rancher"
         else:
             profession = "None"
+        foraging_level = 10 if foraging.p10.get() != NONE else 5 if foraging.p5.get() != NONE else 0
         return Settings(
             profession=profession,
             process=self.process.get(),
-            foraging_level=foraging.level.get(),
+            foraging_level=foraging_level,
             gatherer=foraging.p5.get() == "Gatherer",
             botanist=foraging.p10.get() == "Botanist",
+            tiller=farming.p5.get() == "Tiller",
+            agriculturist=farming.p10.get() == "Agriculturist",
         )
 
     def add_building(self):
@@ -406,6 +482,60 @@ class App:
     def remove_building(self, card):
         card.frame.destroy()
         self.buildings.remove(card)
+        self.update_plot()
+
+    def add_crop(self):
+        options = harvestable_crops(self.season.get())
+        if not options:
+            messagebox.showinfo("No crops",
+                                f"No crops can be harvested in {self.season.get()}.")
+            return
+        frame = ttk.Frame(self.crop_frame)
+        frame.pack(fill="x", pady=2)
+        crop = tk.StringVar(value=options[0])
+        number = tk.IntVar(value=1)
+        replace = tk.BooleanVar(value=False)
+
+        spin = tk.Spinbox(frame, textvariable=number, from_=1, to=999, width=4,
+                          command=self.update_plot)
+        spin.pack(side="left")
+        spin.bind("<KeyRelease>", lambda e: self.update_plot())
+        ttk.Label(frame, text="\u00d7").pack(side="left", padx=2)
+
+        combo = ttk.Combobox(frame, textvariable=crop, values=options, state="readonly", width=12)
+        combo.pack(side="left")
+
+        check = ttk.Checkbutton(frame, text="Replace", variable=replace, command=self.update_plot)
+        check.pack(side="left", padx=(6, 0))
+
+        row = SimpleNamespace(frame=frame, crop=crop, number=number, replace=replace,
+                              spin=spin, combo=combo, check=check)
+        combo.bind("<<ComboboxSelected>>", lambda e: (self.refresh_crop_row(row), self.update_plot()))
+        ttk.Button(frame, text="\u2715", width=3,
+                   command=lambda: self.remove_crop(row)).pack(side="left", padx=(6, 0))
+        self.crops.append(row)
+        self.refresh_crop_row(row)
+        self.update_plot()
+
+    def refresh_crop_row(self, row):
+        """A regrowing crop keeps producing on its own, so "Replace" only
+        applies to (and is only enabled for) one-and-done crops."""
+        regrows = CROPS[row.crop.get()][2] is not None
+        if regrows:
+            row.replace.set(False)
+        row.check.config(state="disabled" if regrows else "normal")
+
+    def remove_crop(self, row):
+        row.frame.destroy()
+        self.crops.remove(row)
+        self.update_plot()
+
+    def on_season_change(self):
+        for row in list(self.crops):
+            row.frame.destroy()
+        self.crops.clear()
+        if harvestable_crops(self.season.get()):
+            self.add_crop()
         self.update_plot()
 
     def update_plot(self):
@@ -426,6 +556,15 @@ class App:
                                        f"{row.animal.get()} (start {row.friendship.get()})"))
                 total[days - 1] += y
                 plotted += 1
+        for row in self.crops:
+            count = read_int(row.number, 0)
+            crop = row.crop.get()
+            days, per_event = crop_events(crop, row.replace.get(), s)
+            y = count * per_event
+            label = f"{count} × {crop}" + (" (replace)" if row.replace.get() else "")
+            self.ax.scatter(days, y, s=18, label=label)
+            total[days - 1] += y
+            plotted += 1
         if plotted:
             self.ax.plot(DAYS, total, label="Total profit", color="black",
                         linewidth=2, marker="o", markersize=4, zorder=0)

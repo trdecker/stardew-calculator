@@ -5,7 +5,12 @@ Reuses run.py's game-data model (ANIMALS, BUILDINGS, profit_events) but instead
 of plotting profit curves, scores each animal's expected profit and solves
 linear programs that (a) fill a building to capacity with the best animal mix
 and (b) choose which building types to build, up to a total building count.
+Building cost (gold+wood) and the processing machinery each animal's goods
+require (e.g. Mayonnaise Machines for eggs) both factor into the ROI used to
+pick building types.
 """
+
+import math
 
 import numpy as np
 from scipy.optimize import linprog
@@ -43,6 +48,52 @@ UPGRADE_CHAIN = {
     "Big Barn": ["Barn", "Big Barn"],
     "Deluxe Barn": ["Barn", "Big Barn", "Deluxe Barn"],
 }
+
+
+# Which processing machine turns each raw animal product into its sellable processed good
+# (relevant since settings_for() always sets process=True).
+PRODUCT_MACHINE = {
+    "Egg": "Mayonnaise Machine",
+    "Void Egg": "Mayonnaise Machine",
+    "Duck Egg": "Mayonnaise Machine",
+    "Dinosaur Egg": "Mayonnaise Machine",
+    "Ostrich Egg": "Mayonnaise Machine",
+    "Milk": "Cheese Press",
+    "Goat Milk": "Cheese Press",
+    "Wool": "Loom",
+    "Truffle": "Oil Maker",
+}
+
+# Approximate (gold, wood) crafting cost per machine. Non-wood materials (stone, fiber,
+# copper/gold bar, slime) aren't purchasable, so they're valued at their wiki sell price.
+MACHINE_COST = {
+    "Mayonnaise Machine": (80, 50),    # 15 Stone + 1 Earth Crystal, 50 Wood
+    "Cheese Press":       (80, 45),    # 10 Stone + 1 Copper Bar, 45 Wood
+    "Loom":               (0, 60),     # 30 Fiber (negligible value), 60 Wood
+    "Oil Maker":          (450, 100),  # 40 Slime + 1 Gold Bar, 100 Wood
+}
+
+
+def machine_counts(counts):
+    """How many of each machine are needed to keep up with a building's animal fill,
+    assuming steady-state average throughput (1 item/machine/day) rather than
+    worst-case peak -- output that can't be processed the same day just queues and is
+    processed (and sold at full value) a bit later, so this doesn't cost any profit,
+    only delays it."""
+    rates = {}
+    for animal, n in counts.items():
+        product, interval = run.ANIMALS[animal][0], run.ANIMALS[animal][1]
+        machine = PRODUCT_MACHINE[product]
+        rates[machine] = rates.get(machine, 0) + n / interval
+    return {m: math.ceil(r) for m, r in rates.items()}
+
+
+def machine_cost(counts):
+    """Total (gold, wood) to build the machines needed for a building's animal fill."""
+    machines = machine_counts(counts)
+    gold = sum(MACHINE_COST[m][0] * n for m, n in machines.items())
+    wood = sum(MACHINE_COST[m][1] * n for m, n in machines.items())
+    return gold, wood
 
 
 def building_cost(building):
@@ -111,7 +162,8 @@ def best_farm(profession, weights):
         building_picks[building] = counts
         building_totals[building] = total
 
-    costs = {t: building_cost(t) for t in run.BUILDINGS}
+    costs = {t: tuple(a + b for a, b in zip(building_cost(t), machine_cost(building_picks[t])))
+             for t in run.BUILDINGS}
     building_counts = choose_building_counts(building_totals, costs)
     farm_total = sum(n * building_totals[t] for t, n in building_counts.items())
     gold = sum(n * costs[t][0] for t, n in building_counts.items())
@@ -140,6 +192,10 @@ def main():
             print(f"  {n} x {building} (capacity {run.BUILDINGS[building][2]} each):")
             for a, count in building_picks[building].items():
                 print(f"    {count} x {a}  ({profits[a]:.1f}g each/month)")
+            print("  Machines per building (processing delays accepted, so sized to "
+                  "average throughput, not peak):")
+            for m, count in machine_counts(building_picks[building]).items():
+                print(f"    {count} x {m}")
 
 
 if __name__ == "__main__":
